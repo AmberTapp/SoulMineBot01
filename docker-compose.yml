@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database
+  postgres:
+    image: postgres:15-alpine
+    container_name: soulmine-bot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: soulmine_db
+      POSTGRES_USER: soulmine
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-soulmine_password}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    networks:
+      - soulmine-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U soulmine"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis cache
+  redis:
+    image: redis:7-alpine
+    container_name: soulmine-bot-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - soulmine-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Main bot service
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: soulmine-bot
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+    environment:
+      - DATABASE_URL=postgresql://soulmine:${DB_PASSWORD:-soulmine_password}@postgres:5432/soulmine_db
+      - REDIS_URL=redis://redis:6379
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - WEB_APP_URL=${WEB_APP_URL}
+      - SUPPORT_CHAT_ID=${SUPPORT_CHAT_ID}
+      - NEWS_CHANNEL_ID=${NEWS_CHANNEL_ID}
+      - ADMIN_IDS=${ADMIN_IDS}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - soulmine-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  soulmine-network:
+    driver: bridge
